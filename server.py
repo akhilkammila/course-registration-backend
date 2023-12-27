@@ -1,17 +1,21 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 import uuid
 import requests
 import json
 from postmarkcreds import api_key
+from flask_cors import CORS
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://akhilkammila:@localhost/course_registration'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
+CORS(app, resources={r"/*": {"origins": "*"}})  # This allows all domains. For security, list only the origins you trust.
+
+apiBaseUrl = 'http://127.0.0.1:5000'
 
 class Users(db.Model):
     email = db.Column(db.String(255), primary_key=True)
@@ -29,11 +33,11 @@ class Users(db.Model):
         self.reset_token_expires = datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
 
 def send_email(user_email, link_endpoint, token):
-    link = f"http://localhost:5000/{link_endpoint}/{token}"
+    link = f"{apiBaseUrl}/{link_endpoint}/{token}"
     postmark_token = api_key
     sender_email = 'notifier@gtregistration.com'
     subject = '[GT Registration] Verify your account'
-    text_body = f'Please click on the link to verify your account: {link}'
+    text_body = f'Please click on the link to {link_endpoint}: {link}'
     html_body = f'<html><body><strong>Please click on the link to verify your account:</strong> <a href="{link}">{link}</a></body></html>'
 
     headers = {
