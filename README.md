@@ -19,3 +19,5 @@ SELECT * FROM users;
 Running server:
 Run and use postmal for post requests
 Get request in browser for testing
+
+Testing endpoints:
