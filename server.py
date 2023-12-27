@@ -16,6 +16,7 @@ db = SQLAlchemy(app)
 CORS(app, resources={r"/*": {"origins": "*"}})  # This allows all domains. For security, list only the origins you trust.
 
 apiBaseUrl = 'http://127.0.0.1:5000'
+webpageBaseUrl = 'http://127.0.0.1:3000'
 
 class Users(db.Model):
     email = db.Column(db.String(255), primary_key=True)
@@ -32,13 +33,13 @@ class Users(db.Model):
         self.reset_token = str(uuid.uuid4())
         self.reset_token_expires = datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
 
-def send_email(user_email, link_endpoint, token):
-    link = f"{apiBaseUrl}/{link_endpoint}/{token}"
+def send_email(user_email, base_url, link_endpoint, token):
+    link = f"{base_url}/{link_endpoint}/{token}"
     postmark_token = api_key
     sender_email = 'notifier@gtregistration.com'
     subject = '[GT Registration] Verify your account'
     text_body = f'Please click on the link to {link_endpoint}: {link}'
-    html_body = f'<html><body><strong>Please click on the link to verify your account:</strong> <a href="{link}">{link}</a></body></html>'
+    html_body = f'<html><body><strong>Please click on the link to {link_endpoint}:</strong> <a href="{link}">{link}</a></body></html>'
 
     headers = {
         'Accept': 'application/json',
@@ -70,7 +71,7 @@ def create_account():
     if existing_user and not existing_user.verified:
         existing_user.password = hashed_password
         existing_user.generate_verification_token()
-        send_email(data['email'], "verify_account", existing_user.verification_token)
+        send_email(data['email'], apiBaseUrl, "verify_account", existing_user.verification_token)
         db.session.commit()
         return jsonify({'message': 'Existing unverified account found. Verification email resent.'}), 200
 
@@ -81,7 +82,7 @@ def create_account():
     new_user.generate_verification_token()
     db.session.add(new_user)
     db.session.commit()
-    send_email(data['email'], "verify_account", new_user.verification_token)
+    send_email(data['email'], apiBaseUrl, "verify_account", new_user.verification_token)
     return jsonify({'message': 'Verification email sent.'}), 201
 
 @app.route('/verify_account/<token>', methods=['GET'])
@@ -107,7 +108,7 @@ def request_reset():
     if user:
         user.generate_reset_token()
         db.session.commit()
-        send_email(data['email'], "reset_password", user.reset_token)
+        send_email(data['email'], webpageBaseUrl, "reset_password", user.reset_token)
 
     # Always return the same message to avoid revealing which emails are registered
     return jsonify({'message': 'If the email is registered, a reset link has been sent.'}), 200
