@@ -18,6 +18,10 @@ CORS(app, resources={r"/*": {"origins": "*"}})  # This allows all domains. For s
 apiBaseUrl = 'http://127.0.0.1:5000'
 webpageBaseUrl = 'http://127.0.0.1:3000'
 
+"""
+0. Schema and helpers
+"""
+
 class Users(db.Model):
     email = db.Column(db.String(255), primary_key=True)
     password = db.Column(db.String(255))
@@ -32,6 +36,20 @@ class Users(db.Model):
     def generate_reset_token(self):
         self.reset_token = str(uuid.uuid4())
         self.reset_token_expires = datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
+    
+    classes = db.relationship('Class', secondary='user_class', back_populates='users')
+
+class Class(db.Model):
+    crn = db.Column(db.Integer, primary_key=True)
+    users = db.relationship('Users', secondary='user_class', back_populates='classes')
+
+class UserClass(db.Model):
+    user_email = db.Column(db.String(255), db.ForeignKey('users.email'), primary_key=True)
+    class_crn = db.Column(db.Integer, db.ForeignKey('class.crn'), primary_key=True)
+
+    notes = db.Column(db.String(255))
+    waitlist = db.Column(db.Boolean, default=False)
+    open = db.Column(db.Boolean, default=False)
 
 def send_email(user_email, base_url, link_endpoint, token):
     link = f"{base_url}/{link_endpoint}/{token}"
@@ -141,6 +159,40 @@ def sign_in():
         else:
             return jsonify({'message': 'Account not verified.'}), 403
     return jsonify({'message': 'Login failed.'}), 401
+
+"""
+4. Managing Classes and Relations
+"""
+@app.route('/update_classes', methods=['POST'])
+def update_classes():
+    data = request.json
+    user_id = data['accountName']
+    new_classes = data['rows']
+
+    user = Users.query.get(user_id)
+    if user:
+        # Need to clear classes that are only referenced once
+        user.classes.clear()
+
+        for class_info in new_classes:
+            class_id = class_info['crn']
+            notes = class_info.get('notes', '')
+            waitlist = class_info.get('waitlist', False)
+            open_status = class_info.get('open', False)
+
+            class_obj = Class.query.get(class_id)
+            if not class_obj:
+                class_obj = Class(crn=class_id)
+                db.session.add(class_obj)
+
+            # Create a new user-class relation
+            user_class = UserClass(user_email=user.email, class_crn=class_obj.crn, notes=notes, waitlist=waitlist, open=open_status)
+            db.session.add(user_class)
+
+        db.session.commit()
+        return jsonify({'message': 'Classes updated successfully.'}), 200
+
+    return jsonify({'message': 'User not found.'}), 404
 
 """
 Test Endpoint
