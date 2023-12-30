@@ -30,6 +30,9 @@ class Users(db.Model):
     reset_token = db.Column(db.String(255), unique=True, nullable=True)
     reset_token_expires = db.Column(db.DateTime, nullable=True)
 
+    first_time = db.Column(db.Boolean, default=True)
+    bot_requested = db.Column(db.Boolean, default=False)
+
     def generate_verification_token(self):
         self.verification_token = str(uuid.uuid4())
     
@@ -41,6 +44,7 @@ class Users(db.Model):
 
 class Class(db.Model):
     crn = db.Column(db.Integer, primary_key=True)
+    status = db.Column(db.Integer, default=0)
     users = db.relationship('Users', secondary='user_class', back_populates='classes')
 
 class UserClass(db.Model):
@@ -172,7 +176,10 @@ def update_classes():
     user = Users.query.get(user_id)
     if user:
         # Need to clear classes that are only referenced once
+        user.first_time = True
+        user.bot_requested = False
         user.classes.clear()
+        db.session.commit()
 
         for class_info in new_classes:
             class_id = class_info['crn']
@@ -191,8 +198,45 @@ def update_classes():
 
         db.session.commit()
         return jsonify({'message': 'Classes updated successfully.'}), 200
-
     return jsonify({'message': 'User not found.'}), 404
+
+"""
+5. Bot queries
+"""
+@app.route('/get_user_classes', methods=['GET'])
+def get_user_classes():
+    # Constructing the query
+    query = (db.session.query(
+                Users.email, 
+                Users.first_time, 
+                Class.crn, 
+                UserClass.notes, 
+                Class.status
+            )
+            .join(UserClass, Users.email == UserClass.user_email)
+            .join(Class, UserClass.class_crn == Class.crn)
+            .filter(Users.verified == True)
+        )
+
+    # Executing the query
+    result = query.all()
+
+    # IF first_time, set the users' bot_requested to True
+    update_query = (
+        db.update(Users)
+        .where(Users.first_time == True)
+        .values(bot_requested=True)
+    )
+    db.session.execute(update_query)
+    db.session.commit()
+
+    # Formatting the results into the desired structure
+    formatted_result = {}
+    for email, first_time, crn, note, status in result:
+        if email not in formatted_result:
+            formatted_result[email] = {'first_time': first_time, 'courses': []}
+        formatted_result[email]['courses'].append({'crn': crn, 'note': note, 'status': status})
+    return formatted_result
 
 """
 Test Endpoint
