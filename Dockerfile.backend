@@ -1,0 +1,15 @@
+FROM python:3.8-slim
+
+COPY requirements.txt /
+RUN pip3 install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y netcat-openbsd && rm -rf /var/lib/apt/lists/*
+
+COPY server.py /app/
+COPY postmarkcreds.py /app/
+COPY wait-for-it.sh /
+RUN chmod +x /wait-for-it.sh
+
+WORKDIR /app
+EXPOSE 5000
+ENV WEBPAGE_BASE_URL="*"
+CMD ["python3", "server.py"]

@@ -1,6 +1,6 @@
 Flask
 Flask-SQLAlchemy
 Werkzeug
-psycopg2
+psycopg2-binary
 requests
 flask_cors

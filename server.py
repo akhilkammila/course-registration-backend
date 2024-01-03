@@ -5,18 +5,22 @@ from datetime import datetime, timedelta
 import uuid
 import requests
 import json
+import os
 from postmarkcreds import api_key
 from flask_cors import CORS
 
+uri = os.getenv('SQLALCHEMY_DATABASE_URI')
+if not uri: uri = 'postgresql://akhilkammila:@localhost/course_registration'
+
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://akhilkammila:@localhost/course_registration'
+app.config['SQLALCHEMY_DATABASE_URI'] = uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-CORS(app, resources={r"/*": {"origins": "*"}})  # This allows all domains. For security, list only the origins you trust.
-
-apiBaseUrl = 'http://127.0.0.1:5000'
-webpageBaseUrl = 'http://127.0.0.1:3000'
+webpageBaseUrl = os.getenv('webpageBaseUrl')
+if not webpageBaseUrl: webpageBaseUrl = "*"
+print(webpageBaseUrl)
+CORS(app, resources={r"/*": {"origins": [webpageBaseUrl]}})
 
 """
 0. Schema and helpers
@@ -31,7 +35,6 @@ class Users(db.Model):
     reset_token_expires = db.Column(db.DateTime, nullable=True)
 
     first_time = db.Column(db.Boolean, default=True)
-    bot_requested = db.Column(db.Boolean, default=False)
 
     def generate_verification_token(self):
         self.verification_token = str(uuid.uuid4())
@@ -52,8 +55,7 @@ class UserClass(db.Model):
     class_crn = db.Column(db.Integer, db.ForeignKey('class.crn'), primary_key=True)
 
     notes = db.Column(db.String(255))
-    waitlist = db.Column(db.Boolean, default=False)
-    open = db.Column(db.Boolean, default=False)
+    notifications = db.Column(db.Boolean, default=False)
 
 def send_email(user_email, base_url, link_endpoint, token):
     link = f"{base_url}/{link_endpoint}/{token}"
@@ -93,7 +95,7 @@ def create_account():
     if existing_user and not existing_user.verified:
         existing_user.password = hashed_password
         existing_user.generate_verification_token()
-        send_email(data['email'], apiBaseUrl, "verify_account", existing_user.verification_token)
+        send_email(data['email'], webpageBaseUrl, "verify_account", existing_user.verification_token)
         db.session.commit()
         return jsonify({'message': 'Existing unverified account found. Verification email resent.'}), 200
 
@@ -104,7 +106,7 @@ def create_account():
     new_user.generate_verification_token()
     db.session.add(new_user)
     db.session.commit()
-    send_email(data['email'], apiBaseUrl, "verify_account", new_user.verification_token)
+    send_email(data['email'], webpageBaseUrl, "verify_account", new_user.verification_token)
     return jsonify({'message': 'Verification email sent.'}), 201
 
 @app.route('/verify_account/<token>', methods=['GET'])
@@ -115,7 +117,6 @@ def verify_account(token):
         db.session.commit()
         return jsonify({'message': 'Account verified successfully.'}), 200
     return jsonify({'message': 'Invalid or expired token.'}), 400
-
 
 """
 2. Reset password endpoints
@@ -177,15 +178,13 @@ def update_classes():
     if user:
         # Need to clear classes that are only referenced once
         user.first_time = True
-        user.bot_requested = False
         user.classes.clear()
         db.session.commit()
 
         for class_info in new_classes:
             class_id = class_info['crn']
             notes = class_info.get('notes', '')
-            waitlist = class_info.get('waitlist', False)
-            open_status = class_info.get('open', False)
+            notifications = class_info.get('notifications', False)
 
             class_obj = Class.query.get(class_id)
             if not class_obj:
@@ -193,7 +192,7 @@ def update_classes():
                 db.session.add(class_obj)
 
             # Create a new user-class relation
-            user_class = UserClass(user_email=user.email, class_crn=class_obj.crn, notes=notes, waitlist=waitlist, open=open_status)
+            user_class = UserClass(user_email=user.email, class_crn=class_obj.crn, notes=notes, notifications=notifications)
             db.session.add(user_class)
 
         db.session.commit()
@@ -215,19 +214,14 @@ def get_user_classes():
             )
             .join(UserClass, Users.email == UserClass.user_email)
             .join(Class, UserClass.class_crn == Class.crn)
-            .filter(Users.verified == True)
+            .filter(Users.verified == True, UserClass.notifications == True)
         )
 
     # Executing the query
     result = query.all()
 
-    # IF first_time, set the users' bot_requested to True
-    update_query = (
-        db.update(Users)
-        .where(Users.first_time == True)
-        .values(bot_requested=True)
-    )
-    db.session.execute(update_query)
+    # Set all users' first time to false
+    db.session.query(Users).update({Users.first_time: False})
     db.session.commit()
 
     # Formatting the results into the desired structure
@@ -237,6 +231,22 @@ def get_user_classes():
             formatted_result[email] = {'first_time': first_time, 'courses': []}
         formatted_result[email]['courses'].append({'crn': crn, 'note': note, 'status': status})
     return formatted_result
+
+@app.route('/update_class_statuses', methods=['POST'])
+def update_class_statuses():
+    data = request.json
+    if not data:
+        return jsonify({'message': 'No data provided'}), 400
+
+    for crn, status in data.items():
+        class_to_update = Class.query.get(crn)
+        if class_to_update:
+            class_to_update.status = status
+        else:
+            return jsonify({'message': f'Class with CRN {crn} not found'}), 404
+
+    db.session.commit()
+    return jsonify({'message': 'Class statuses updated successfully'}), 200
 
 """
 Test Endpoint
@@ -248,4 +258,4 @@ def get_example():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
