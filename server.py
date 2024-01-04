@@ -165,6 +165,33 @@ def sign_in():
             return jsonify({'message': 'Account not verified.'}), 403
     return jsonify({'message': 'Login failed.'}), 401
 
+@app.route('/get_user_rows', methods=['POST'])
+def get_user_rows():
+    data = request.json
+    accountName = data.get('accountName')
+
+    if not accountName:
+        return jsonify({"error": "Account name (email) is required"}), 400
+    
+    user = Users.query.filter_by(email=accountName).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user_classes = UserClass.query.filter_by(user_email=accountName).all()
+
+
+    classes_info = []
+    for user_class in user_classes:
+        class_info = {
+            "crn": user_class.class_crn,
+            "notes": user_class.notes,
+            "notifications": user_class.notifications
+        }
+        classes_info.append(class_info)
+
+    return jsonify(classes_info)
+
+
 """
 4. Managing Classes and Relations
 """
